@@ -1,0 +1,70 @@
+Packages and user setup:
+# dnf install qemu-kvm qemu-img libvirt virt-install
+$ sudo usermod -G libvirt -a $(whoami)
+$ sudo usermod -G kvm -a $(whoami)
+
+Enable iommu and blacklist nouveau:
+$ cat /etc/default/grub
+...
+GRUB_CMDLINE_LINUX="rd.lvm.lv=fedora/root rd.lvm.lv=fedora/swap rhgb quiet intel_iommu=on rd.driver.blacklist=nouveau"
+...
+
+# grub2-mkconfig -o /boot/efi/EFI/fedora/grub.cfg
+# grub2-mkconfig -o /boot/grub2/grub.cfg
+
+$ cat /etc/modprobe.d/blacklist.conf 
+blacklist nouveau
+
+Reboot and check:
+# virt-host-validate # from libvirt-client RPM
+$ lsmod | grep nouveau
+
+Add GPU devices into VFIO:
+$ dmesg | grep -e DMAR -e IOMMU
+$ lspci -nnk
+
+$ cat /etc/modprobe.d/vfio.conf 
+options vfio-pci ids=10de:1c03,10de:10f1
+options vfio-pci disable_vga=1
+
+$ cat /etc/default/grub
+...
+GRUB_CMDLINE_LINUX="rd.lvm.lv=fedora/root rd.lvm.lv=fedora/swap rhgb quiet intel_iommu=on rd.driver.blacklist=nouveau rd.driver.pre=vfio-pci"
+...
+
+# grub2-mkconfig -o /boot/efi/EFI/fedora/grub.cfg
+# grub2-mkconfig -o /boot/grub2/grub.cfg
+
+$ cat /etc/dracut.conf.d/vfio.conf
+add_drivers+="vfio vfio_iommu_type1 vfio_pci"
+
+# dracut -f --kver `uname -r`
+
+Verify VFIO:
+$ lspci -nnk
+...
+Kernel driver in use: vfio-pci
+...
+
+Install latest OVMF:
+# dnf install dnf-plugins-core
+# dnf config-manager --add-repo http://www.kraxel.org/repos/firmware.repo
+# dnf install edk2.git-ovmf-x64
+
+Setup in virt-manager:
+Bios: OVMF UEFI latest
+Chipset: Q35
+Disk: VirtIO
+Delete both graphic and video
+Pass GPU and USB etc.
+
+Using virsh --connect qemu:///system edit manually:
+...
+<cpu mode='host-passthrough' check='none'/>
+...
+<features>
+  <kvm>
+    <hidden state='on'/>
+  </kvm>
+</features>
+...
